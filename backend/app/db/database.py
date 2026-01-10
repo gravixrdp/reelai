@@ -1,13 +1,14 @@
 """Database connection and session management"""
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from app.core.config import settings
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
+from app.core.config import get_settings
+
+settings = get_settings()
 
 # Create database engine
 engine = create_engine(
     settings.database_url,
-    echo=settings.database_echo,
     pool_pre_ping=True,
     pool_size=20,
     max_overflow=40,

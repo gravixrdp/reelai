@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import datetime
 from app.db.database import get_db
-from app.models.instagram_account import InstagramAccount, AccountStatus
+from app.models.instagram import InstagramAccount, InstagramAccountStatus
 from app.models.reel_schedule import ReelSchedule, ScheduleStatus
 from app.models.reel import Reel
 from app.schemas.reel_schedule import (
@@ -45,10 +45,14 @@ async def create_schedule(
             detail=f"Instagram account {schedule_data.instagram_account_id} not found"
         )
     
-    if account.status != AccountStatus.ACTIVE:
+    # Verify Instagram account exists and is active/connected
+    # We now enforce strict 'connected' status from the new verification flow
+    from app.models.instagram import InstagramAccountStatus
+    
+    if account.status != InstagramAccountStatus.CONNECTED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot schedule on {account.status} account '{account.username}'. Account must be active."
+            detail=f"Cannot schedule on account '{account.username}'. Account must be verified and status '{InstagramAccountStatus.CONNECTED.value}' (current: {account.status})."
         )
     
     # Check if already scheduled

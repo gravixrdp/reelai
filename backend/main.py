@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.core.database import init_db
-from app.api import health, video, reels, social, social_checker, instagram, schedules
+from app.api import health, video, reels, social, social_checker, schedules
 import logging
 
 # Setup logging
@@ -34,13 +34,23 @@ app.add_middleware(
 
 
 # Include routers
+# Include routers
 app.include_router(health.router)
 app.include_router(video.router)
 app.include_router(reels.router)
 app.include_router(social.router)
 app.include_router(social_checker.router)
-app.include_router(instagram.router, prefix="/api")
+
+# New verified instagram router
+from app.api.routers import instagram as instagram_verified
+app.include_router(instagram_verified.router, prefix="/api/instagram", tags=["Instagram Verified"])
+
 app.include_router(schedules.router, prefix="/api")
+
+# Analytics router
+from app.routers import analytics
+app.include_router(analytics.router)
+
 
 
 # Root endpoint

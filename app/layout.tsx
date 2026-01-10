@@ -1,26 +1,34 @@
 import type { Metadata } from "next";
-import "@/styles/globals.css";
-import { RootLayout } from "@/components/layout/root-layout";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { cn } from "@/lib/utils";
+import Sidebar from "@/components/layout/sidebar";
+import Background from "@/components/layout/background";
+import { Toaster } from "@/components/ui/toaster";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Reels Forge — Neural YouTube to Instagram Reels Converter",
-  description:
-    "Neural Networks. Quantum Processing. Transform YouTube videos into viral Instagram Reels with AI precision.",
-  keywords: ["Reels Forge", "YouTube", "Instagram", "Reels", "AI", "Neural Networks", "Quantum"],
-  authors: [{ name: "Reels Forge" }],
-  creator: "Reels Forge",
+  title: "Reels Studio",
+  description: "Premium automated content creation.",
 };
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#000000" />
-      </head>
-      <body>
-        <RootLayout>{children}</RootLayout>
+    <html lang="en" className="dark">
+      <body className={cn(inter.variable, "bg-background text-foreground antialiased selection:bg-white/20 overflow-hidden")}>
+        <Background />
+        <div className="flex h-screen w-full relative z-10">
+          <Sidebar />
+          <main className="flex-1 overflow-auto">
+            {children}
+          </main>
+        </div>
+        <Toaster />
       </body>
     </html>
   );

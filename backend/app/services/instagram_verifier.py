@@ -5,7 +5,7 @@ import os
 from typing import Dict, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models.instagram_account import InstagramAccount, AccountStatus
+from app.models.instagram import InstagramAccount, InstagramAccountStatus as AccountStatus
 from app.services.instagram_image_publisher import InstagramImagePublisher
 from app.services.cdn_upload_service import CDNUploadService
 

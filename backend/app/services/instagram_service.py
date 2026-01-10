@@ -1,272 +1,153 @@
-"""Instagram upload and integration service"""
-
-import logging
-import httpx
-from typing import Dict, Optional, Tuple
-from datetime import datetime, timedelta
-from app.core.config import get_settings
-from app.utils.helpers import get_logger
-
-logger = get_logger(__name__)
-settings = get_settings()
-
+from sqlalchemy.orm import Session
+from app.models.instagram import InstagramAccount, InstagramAccountStatus
+from app.schemas.instagram import InstagramAccountCreate, InstagramAccountUpdate
+from datetime import datetime
+import requests
+from typing import Optional
 
 class InstagramService:
-    """Service for Instagram Graph API integration"""
-    
-    def __init__(self):
-        self.api_version = settings.instagram_graph_api_version
-        self.api_url = settings.instagram_api_url
-        self.timeout = 30
-    
-    async def get_oauth_url(self, redirect_uri: str, state: str) -> str:
-        """
-        Generate OAuth authorization URL
-        
-        User will be redirected to Instagram to authorize the app
-        """
-        oauth_url = (
-            f"https://api.instagram.com/oauth/authorize?"
-            f"client_id={settings.instagram_business_account_id}&"
-            f"redirect_uri={redirect_uri}&"
-            f"scope=instagram_business_basic,instagram_business_content_publish&"
-            f"response_type=code&"
-            f"state={state}"
-        )
-        
-        logger.info(f"Generated OAuth URL for Instagram")
-        return oauth_url
-    
-    async def handle_oauth_callback(self, code: str, redirect_uri: str) -> Tuple[bool, Optional[Dict]]:
-        """
-        Handle OAuth callback and exchange code for access token
-        
-        Returns: (success, token_data)
-        token_data: {"access_token": "...", "user_id": "...", "username": "..."}
-        """
-        try:
-            # Exchange code for short-lived token
-            token_url = f"{self.api_url}/oauth/access_token"
-            
-            params = {
-                'client_id': settings.instagram_business_account_id,
-                'client_secret': settings.instagram_business_account_id,  # In production, use separate secret
-                'grant_type': 'authorization_code',
-                'redirect_uri': redirect_uri,
-                'code': code,
-            }
-            
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(token_url, data=params)
-                response.raise_for_status()
-                token_data = response.json()
-            
-            if 'access_token' not in token_data:
-                logger.error(f"No access token in response: {token_data}")
-                return False, None
-            
-            short_lived_token = token_data['access_token']
-            
-            # Exchange for long-lived token (valid for 60 days)
-            long_token_data = await self._exchange_for_long_lived_token(short_lived_token)
-            
-            if not long_token_data:
-                logger.warning("Could not get long-lived token, using short-lived")
-                long_token_data = {
-                    'access_token': short_lived_token,
-                    'expires_in': 3600,
-                }
-            
-            # Get user info
-            user_info = await self._get_user_info(long_token_data['access_token'])
-            
-            if not user_info:
-                logger.error("Could not get user info")
-                return False, None
-            
-            result = {
-                'access_token': long_token_data['access_token'],
-                'user_id': user_info.get('id'),
-                'username': user_info.get('username'),
-                'expires_in': long_token_data.get('expires_in'),
-            }
-            
-            logger.info(f"Instagram OAuth successful. User: {user_info.get('username')}")
-            return True, result
-        
-        except Exception as e:
-            logger.error(f"Error in OAuth callback: {str(e)}", exc_info=True)
-            return False, None
-    
-    async def _exchange_for_long_lived_token(self, short_lived_token: str) -> Optional[Dict]:
-        """Exchange short-lived token for long-lived token"""
-        try:
-            url = f"{self.api_url}/access_token"
-            
-            params = {
-                'grant_type': 'ig_refresh_token',
-                'access_token': short_lived_token,
-            }
-            
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                return response.json()
-        
-        except Exception as e:
-            logger.warning(f"Could not exchange for long-lived token: {str(e)}")
-            return None
-    
-    async def _get_user_info(self, access_token: str) -> Optional[Dict]:
-        """Get authenticated user info"""
-        try:
-            url = f"{self.api_url}/me"
-            
-            params = {
-                'fields': 'id,username,name',
-                'access_token': access_token,
-            }
-            
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                return response.json()
-        
-        except Exception as e:
-            logger.error(f"Error getting user info: {str(e)}")
-            return None
-    
-    async def upload_reel(self, 
-                         reel_file_path: str,
-                         caption: str,
-                         access_token: str,
-                         thumbnail_path: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
-        """
-        Upload reel to Instagram
-        
-        Returns: (success, post_id, post_url)
-        """
-        try:
-            logger.info(f"Uploading reel to Instagram: {reel_file_path}")
-            
-            # Get user's business account ID
-            user_info = await self._get_user_info(access_token)
-            if not user_info:
-                logger.error("Could not get user info for upload")
-                return False, None, None
-            
-            user_id = user_info['id']
-            
-            # Create media container
-            media_id = await self._create_media_container(
-                user_id, 
-                reel_file_path, 
-                caption, 
-                access_token
-            )
-            
-            if not media_id:
-                logger.error("Failed to create media container")
-                return False, None, None
-            
-            # Publish media
-            post_id, post_url = await self._publish_media(media_id, access_token)
-            
-            if post_id:
-                logger.info(f"Reel uploaded successfully. Post ID: {post_id}")
-                return True, post_id, post_url
-            else:
-                logger.error("Failed to publish media")
-                return False, None, None
-        
-        except Exception as e:
-            logger.error(f"Error uploading reel: {str(e)}", exc_info=True)
-            return False, None, None
-    
-    async def _create_media_container(self,
-                                     user_id: str,
-                                     video_path: str,
-                                     caption: str,
-                                     access_token: str) -> Optional[str]:
-        """Create media container for video upload"""
-        try:
-            url = f"{self.api_url}/{user_id}/media"
-            
-            # Upload video file
-            with open(video_path, 'rb') as f:
-                files = {'video': f}
-                
-                data = {
-                    'media_type': 'REELS',
-                    'caption': caption,
-                    'access_token': access_token,
-                }
-                
-                async with httpx.AsyncClient(timeout=300) as client:
-                    response = await client.post(url, data=data, files=files)
-                    response.raise_for_status()
-                    result = response.json()
-            
-            media_id = result.get('id')
-            if media_id:
-                logger.info(f"Media container created: {media_id}")
-                return media_id
-            else:
-                logger.error(f"No media ID in response: {result}")
-                return None
-        
-        except Exception as e:
-            logger.error(f"Error creating media container: {str(e)}")
-            return None
-    
-    async def _publish_media(self, media_id: str, access_token: str) -> Tuple[Optional[str], Optional[str]]:
-        """Publish media to Instagram"""
-        try:
-            url = f"{self.api_url}/{media_id}/publish"
-            
-            data = {
-                'access_token': access_token,
-            }
-            
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(url, data=data)
-                response.raise_for_status()
-                result = response.json()
-            
-            post_id = result.get('id')
-            post_url = f"https://instagram.com/p/{post_id}" if post_id else None
-            
-            if post_id:
-                logger.info(f"Media published. Post ID: {post_id}")
-                return post_id, post_url
-            else:
-                logger.error(f"No post ID in response: {result}")
-                return None, None
-        
-        except Exception as e:
-            logger.error(f"Error publishing media: {str(e)}")
-            return None, None
-    
-    async def disconnect_account(self, access_token: str) -> bool:
-        """Revoke Instagram access"""
-        try:
-            url = f"{self.api_url}/me/permissions"
-            
-            data = {
-                'access_token': access_token,
-            }
-            
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.delete(url, data=data)
-                response.raise_for_status()
-            
-            logger.info("Instagram account disconnected")
-            return True
-        
-        except Exception as e:
-            logger.error(f"Error disconnecting Instagram: {str(e)}")
-            return False
+    def __init__(self, db: Session):
+        self.db = db
 
-        """Disconnect Instagram account - placeholder"""
-        # TODO: Remove stored access token
-        pass
+    def create_account(self, account_data: InstagramAccountCreate) -> InstagramAccount:
+        """
+        Create Instagram account.
+        If instagram_user_id is not provided, we'll try to fetch it using the access token.
+        """
+        instagram_user_id = account_data.instagram_user_id
+        
+        # If no Instagram user ID provided and we have an access token, try to fetch it from the API
+        if not instagram_user_id and account_data.access_token:
+            try:
+                # Get the user's Facebook pages
+                pages_url = "https://graph.facebook.com/v19.0/me/accounts"
+                params = {"access_token": account_data.access_token}
+                response = requests.get(pages_url, params=params)
+                response.raise_for_status()
+                
+                pages_data = response.json()
+                if not pages_data.get("data"):
+                    raise ValueError("No Facebook pages found for this access token")
+                
+                # Get the first page (you might want to let user choose)
+                page_id = pages_data["data"][0]["id"]
+                page_token = pages_data["data"][0]["access_token"]
+                
+                # Get Instagram Business Account ID from the page
+                ig_url = f"https://graph.facebook.com/v19.0/{page_id}"
+                ig_params = {
+                    "fields": "instagram_business_account",
+                    "access_token": page_token
+                }
+                ig_response = requests.get(ig_url, params=ig_params)
+                ig_response.raise_for_status()
+                
+                ig_data = ig_response.json()
+                instagram_user_id = ig_data.get("instagram_business_account", {}).get("id")
+                
+                if not instagram_user_id:
+                    raise ValueError("No Instagram Business Account linked to this Facebook page")
+                    
+            except Exception as e:
+                # Don't fail account creation if we can't fetch the ID
+                # User can provide it later during verification
+                pass
+        
+        db_account = InstagramAccount(
+            user_id=1,  # TODO: Get from authenticated user
+            username=account_data.username,
+            label=account_data.label,
+            access_token=account_data.access_token,  # Can be None
+            instagram_user_id=instagram_user_id,
+            status=InstagramAccountStatus.PENDING_VERIFICATION
+        )
+        self.db.add(db_account)
+        self.db.commit()
+        self.db.refresh(db_account)
+        return db_account
+
+    def get_account(self, account_id: str) -> Optional[InstagramAccount]:
+        return self.db.query(InstagramAccount).filter(InstagramAccount.id == account_id).first()
+
+    def get_all_accounts(self) -> list[InstagramAccount]:
+        return self.db.query(InstagramAccount).all()
+
+    def verify_connection(self, account_id: str, force: bool = False) -> InstagramAccount:
+        account = self.get_account(account_id)
+        if not account:
+            raise ValueError("Account not found")
+        
+        # Rate limit check (simple version)
+        if account.verification_attempts >= 3 and not force:
+             # Check if last attempt was recent, logic can be added here
+             pass 
+
+        # The Prompt Requires publishing a REAL image.
+        # We will use a reliable public image URL for the test.
+        # Ideally, this should be a "System" asset hosted on our own server or public bucket.
+        # For this implementation, we'll use a placeholder.
+        TEST_IMAGE_URL = "https://placehold.co/1080x1080/000000/FFFFFF/png?text=Reels+Studio+Test"
+        CAPTION = "Instagram connection test via Reels Studio"
+        
+        # 1. Upload Media
+        upload_url = f"https://graph.facebook.com/v19.0/{account.instagram_user_id}/media"
+        params = {
+            "image_url": TEST_IMAGE_URL,
+            "caption": CAPTION,
+            "access_token": account.access_token
+        }
+        
+        try:
+            # Step 1: Create Container
+            response = requests.post(upload_url, params=params)
+            response.raise_for_status()
+            container_id = response.json().get("id")
+            
+            # Step 2: Publish Container
+            publish_url = f"https://graph.facebook.com/v19.0/{account.instagram_user_id}/media_publish"
+            publish_params = {
+                "creation_id": container_id,
+                "access_token": account.access_token
+            }
+            
+            pub_response = requests.post(publish_url, params=publish_params)
+            pub_response.raise_for_status()
+            
+            # Success!
+            account.status = InstagramAccountStatus.CONNECTED
+            account.connected_at = datetime.utcnow()
+            account.last_verified_at = datetime.utcnow()
+            account.verification_attempts = 0 # Reset on success
+            account.last_error = None
+            
+        except requests.exceptions.HTTPError as e:
+            # Failure
+            account.status = InstagramAccountStatus.VERIFICATION_FAILED
+            account.verification_attempts += 1
+            account.last_verified_at = datetime.utcnow()
+            # Capture error details safely
+            try:
+                error_detail = e.response.json().get("error", {}).get("message", str(e))
+            except:
+                error_detail = str(e)
+            account.last_error = error_detail
+
+        except Exception as e:
+            # Generic Failure
+            account.status = InstagramAccountStatus.VERIFICATION_FAILED
+            account.verification_attempts += 1
+            account.last_verified_at = datetime.utcnow()
+            account.last_error = str(e)
+
+        self.db.commit()
+        self.db.refresh(account)
+        return account
+
+    def delete_account(self, account_id: str):
+        # Soft delete logic requested? Prompt says "Soft delete", but generally for 'delete' endpoint we might just mark inactive 
+        # unless strict data retention policy. Let's mark inactive for now as per schema or actually delete row if we want to clean up.
+        # Schema has "INACTIVE" status.
+        account = self.get_account(account_id)
+        if account:
+            account.status = InstagramAccountStatus.INACTIVE
+            self.db.commit()

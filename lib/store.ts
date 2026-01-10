@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { storage } from "@/lib/utils";
 
 interface User {
   id: string;
@@ -26,30 +25,43 @@ export const useAuthStore = create<AuthStore>((set) => ({
   setUser: (user) => {
     set({ user });
     if (user) {
-      storage.set("user", user);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem("user", JSON.stringify(user));
+      }
     } else {
-      storage.remove("user");
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem("user");
+      }
     }
   },
   setToken: (token) => {
     set({ token });
     if (token) {
-      storage.set("authToken", token);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem("authToken", token);
+      }
     } else {
-      storage.remove("authToken");
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem("authToken");
+      }
     }
   },
   setLoading: (loading) => set({ isLoading: loading }),
   logout: () => {
     set({ user: null, token: null });
-    storage.remove("user");
-    storage.remove("authToken");
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem("user");
+      localStorage.removeItem("authToken");
+    }
   },
   initialize: () => {
-    const user = storage.get("user");
-    const token = storage.get("authToken");
-    if (user && token) {
-      set({ user, token });
+    if (typeof window !== 'undefined') {
+      const userStr = localStorage.getItem("user");
+      const token = localStorage.getItem("authToken");
+      if (userStr && token) {
+        const user = JSON.parse(userStr);
+        set({ user, token });
+      }
     }
   },
 }));
@@ -87,6 +99,8 @@ export const useUIStore = create<UIStore>((set) => ({
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setTheme: (theme) => {
     set({ theme });
-    storage.set("theme", theme);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem("theme", theme);
+    }
   },
 }));
