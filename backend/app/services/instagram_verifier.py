@@ -72,10 +72,18 @@ class InstagramVerifier:
             logger.info(f"Starting verification for account: {account.username}")
             
             # Step 1: Upload test image to CDN/public storage
-            public_image_url = await self.cdn_service.upload_file_to_public(
-                local_file_path=self.TEST_IMAGE_PATH,
-                destination_filename=f"verification_{account.username}_{account.id}.jpg"
-            )
+            # In production, we upload the local asset to S3/R2/etc.
+            # In local dev, we cannot serve localhost to Instagram API, so we MUST use a public URL fallback.
+            
+            if self.cdn_service.cdn_type == 'local':
+                 logger.info("Local environment detected. Using fallback public image for Instagram verification.")
+                 # Use a reliable high-quality public image (Unsplash technology/social media placeholder)
+                 public_image_url = "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=1080&auto=format&fit=crop"
+            else:
+                public_image_url = await self.cdn_service.upload_file_to_public(
+                    local_file_path=self.TEST_IMAGE_PATH,
+                    destination_filename=f"verification_{account.username}_{account.id}.jpg"
+                )
             
             if not public_image_url:
                 error_msg = "Failed to upload verification image to public storage"
@@ -85,7 +93,7 @@ class InstagramVerifier:
                 db.commit()
                 return False, error_msg
             
-            logger.info(f"Test image uploaded to: {public_image_url}")
+            logger.info(f"Test image URL prepared: {public_image_url}")
             
             # Step 2: Publish to Instagram using Graph API
             result = self.image_publisher.upload_and_publish_image(

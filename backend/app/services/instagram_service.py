@@ -77,16 +77,14 @@ class InstagramService:
         if not account:
             raise ValueError("Account not found")
         
-        # Rate limit check (simple version)
+        # Rate limit check
         if account.verification_attempts >= 3 and not force:
-             # Check if last attempt was recent, logic can be added here
-             pass 
+             raise ValueError("Maximum verification attempts (3) exceeded. Please contact support.")
 
         # The Prompt Requires publishing a REAL image.
-        # We will use a reliable public image URL for the test.
-        # Ideally, this should be a "System" asset hosted on our own server or public bucket.
-        # For this implementation, we'll use a placeholder.
-        TEST_IMAGE_URL = "https://placehold.co/1080x1080/000000/FFFFFF/png?text=Reels+Studio+Test"
+        # We use a reliable high-quality public image (Unsplash technology/social media placeholder)
+        # This ensures Instagram API can fetch it successfully.
+        TEST_IMAGE_URL = "https://images.unsplash.com/photo-1611162617474-5b21e879e113?q=80&w=1080&auto=format&fit=crop"
         CAPTION = "Instagram connection test via Reels Studio"
         
         # 1. Upload Media
@@ -101,7 +99,11 @@ class InstagramService:
             # Step 1: Create Container
             response = requests.post(upload_url, params=params)
             response.raise_for_status()
-            container_id = response.json().get("id")
+            container_data = response.json()
+            container_id = container_data.get("id")
+            
+            if not container_id:
+                raise ValueError(f"Failed to create media container: {container_data}")
             
             # Step 2: Publish Container
             publish_url = f"https://graph.facebook.com/v19.0/{account.instagram_user_id}/media_publish"
@@ -113,11 +115,21 @@ class InstagramService:
             pub_response = requests.post(publish_url, params=publish_params)
             pub_response.raise_for_status()
             
+            # Additional check: ensure we got a media ID
+            pub_data = pub_response.json()
+            if not pub_data.get("id"):
+                 raise ValueError(f"Failed to publish media: {pub_data}")
+
             # Success!
             account.status = InstagramAccountStatus.CONNECTED
             account.connected_at = datetime.utcnow()
             account.last_verified_at = datetime.utcnow()
-            account.verification_attempts = 0 # Reset on success
+            account.verified_by_post = True
+            # We don't reset verification_attempts to 0, so we have a record connected to history, 
+            # but we could reset it if we want to allow re-verification later. 
+            # Requirements say "Limit verification attempts", usually implies life-time or per-session.
+            # Let's keep it as is or maybe reset if successful? 
+            # Actually, if successful, attempts logic isn't blocked anymore (status is CONNECTED).
             account.last_error = None
             
         except requests.exceptions.HTTPError as e:
@@ -127,10 +139,17 @@ class InstagramService:
             account.last_verified_at = datetime.utcnow()
             # Capture error details safely
             try:
-                error_detail = e.response.json().get("error", {}).get("message", str(e))
+                error_body = e.response.json()
+                error_detail = error_body.get("error", {}).get("message", str(e))
+                # Add subcode/type if available
+                if "error_user_title" in error_body.get("error", {}):
+                     error_detail += f" ({error_body['error']['error_user_title']})"
             except:
                 error_detail = str(e)
             account.last_error = error_detail
+            
+            # Re-raise to inform the user
+            raise ValueError(f"Instagram API Error: {error_detail}")
 
         except Exception as e:
             # Generic Failure
@@ -138,6 +157,7 @@ class InstagramService:
             account.verification_attempts += 1
             account.last_verified_at = datetime.utcnow()
             account.last_error = str(e)
+            raise ValueError(f"Verification failed: {str(e)}")
 
         self.db.commit()
         self.db.refresh(account)

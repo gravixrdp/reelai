@@ -88,7 +88,7 @@ def verify_instagram_account(
         updated_account = service.verify_connection(account_id, force=verify_req.force)
         return updated_account
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Verification process error: {str(e)}")
 
