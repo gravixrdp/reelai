@@ -11,8 +11,8 @@ import { FadeIn, FadeInStagger, FadeInItem } from "@/components/ui/motion";
 
 export default function SettingsPage() {
     const { account, isLoading, error, connectAccount, verifyAccount, disconnectAccount } = useInstagram();
-    const [username, setUsername] = useState("gravi_xshow");
-    const [token, setToken] = useState("EAAZAzZCTeGSbsBQboYINAfJIRnPROIIFLWllIYzwPRgGO4QFu3RTxWqqKDZBJymwUZBriTg8PYI7sp5EttBZBDqd4DkELClYsPNvljnYJwvgPrMS7H1mVF4xD5ZCSG3sr1Nm68QZAwIV3senTFduMZB7JQnt0ViZAZBV290wVnQZCysJp0xAPrr0hCamdShR1ZC6jAZDZD");
+    const [username, setUsername] = useState("");
+    const [token, setToken] = useState("");
     const [igUserId, setIgUserId] = useState("");
 
     const handleConnect = () => {
