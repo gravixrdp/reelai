@@ -32,6 +32,8 @@ class InstagramAccount(Base):
     last_verified_at = Column(DateTime, nullable=True)
     verification_attempts = Column(Integer, default=0)
     last_error = Column(String, nullable=True)
+    verified_by_post = Column(Boolean, default=False)  # True if verified via test post
+    last_verification_error = Column(String, nullable=True)  # Last error during verification
     
     # Feature Flags
     automation_enabled = Column(Boolean, default=False)

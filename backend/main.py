@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.api import health, video, reels, social, social_checker, schedules
@@ -51,6 +52,8 @@ app.include_router(schedules.router, prefix="/api")
 from app.routers import analytics
 app.include_router(analytics.router)
 
+# Mount static files for public CDN access
+app.mount("/public", StaticFiles(directory="public"), name="public")
 
 
 # Root endpoint
