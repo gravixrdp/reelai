@@ -1,170 +1,106 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+"""Video processing routes"""
+
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.core.database import get_db
-from app.models import Video, Reel
-from app.schemas import VideoCreate, VideoResponse, VideoDetailResponse, SocialStatusResponse
-from app.services.youtube_downloader import YouTubeDownloader
-from app.core.config import get_settings
-import uuid
+from app.db.database import get_db
+from app.models.video import Video, VideoStatus
+from app.schemas.video import VideoUploadRequest, VideoStatusResponse
+from app.services.video_orchestrator import VideoOrchestrator
+from app.services.youtube_service import YouTubeService
+import logging
 from datetime import datetime
 
-settings = get_settings()
-router = APIRouter(prefix="/api/video", tags=["video"])
+router = APIRouter(prefix="/videos", tags=["Videos"])
+logger = logging.getLogger(__name__)
 
+async def process_video_background(video_id: int):
+    """Background task wrapper"""
+    orchestrator = VideoOrchestrator()
+    await orchestrator.process_video(video_id)
 
-@router.post("/youtube", response_model=VideoResponse)
-async def upload_youtube_video(
-    request: VideoCreate,
+@router.post("/", response_model=VideoStatusResponse)
+async def create_video(
+    request: VideoUploadRequest, 
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Upload YouTube video for processing"""
-    try:
-        # Validate URL
-        downloader = YouTubeDownloader(
-            yt_dlp_path=settings.yt_dlp_path,
-            videos_dir=settings.videos_dir
-        )
-        
-        video_id = downloader.extract_video_id(request.youtube_url)
-        if not video_id:
-            raise HTTPException(status_code=400, detail="Invalid YouTube URL")
-        
-        # Check if already exists
-        existing = db.query(Video).filter_by(youtube_video_id=video_id).first()
-        if existing:
-            return existing
-        
-        # Create video record
-        video = Video(
-            id=str(uuid.uuid4()),
-            youtube_url=request.youtube_url,
-            youtube_video_id=video_id,
-            title="Processing...",
-            custom_caption=request.custom_caption,
-            status="pending",
-            created_at=datetime.utcnow()
-        )
-        
-        db.add(video)
-        db.commit()
-        db.refresh(video)
-        
-        return video
+    """Submit a YouTube video for processing"""
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/{video_id}", response_model=VideoDetailResponse)
-async def get_video(
-    video_id: str,
-    db: Session = Depends(get_db)
-):
-    """Get video details with chunks and reels"""
-    video = db.query(Video).filter_by(id=video_id).first()
+    # 1. Validate URL
+    yt_service = YouTubeService()
+    video_id_str = yt_service.extract_youtube_id(str(request.youtube_url))
     
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    return video
+    if not video_id_str:
+        raise HTTPException(status_code=400, detail="Invalid YouTube URL")
 
-
-@router.get("/", response_model=list[VideoResponse])
-async def list_videos(
-    db: Session = Depends(get_db),
-    skip: int = Query(0),
-    limit: int = Query(20)
-):
-    """List all videos"""
-    videos = db.query(Video).offset(skip).limit(limit).all()
-    return videos
-
-
-@router.post("/{video_id}/process")
-async def process_video(
-    video_id: str,
-    db: Session = Depends(get_db)
-):
-    """Trigger video processing pipeline"""
-    video = db.query(Video).filter_by(id=video_id).first()
-    
-    if not video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    
-    # Update status to processing
-    video.status = "processing"
+    # 2. Check if already exists
+    existing = db.query(Video).filter(Video.youtube_video_id == video_id_str).first()
+    if existing:
+        # If failed, allow retry? For now return existing
+        return _map_video_response(existing)
+        
+    # 3. Create Record
+    new_video = Video(
+        youtube_url=str(request.youtube_url),
+        youtube_video_id=video_id_str,
+        status=VideoStatus.UPLOADED,
+        custom_caption=request.custom_caption,
+        title=request.title or f"Video {video_id_str}", # Temp title
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
+    db.add(new_video)
     db.commit()
+    db.refresh(new_video)
     
-    # Start background processing
-    import threading
-    import subprocess
-    import json
-    from app.core.database import SessionLocal
+    # 4. Trigger Background Task
+    background_tasks.add_task(process_video_background, new_video.id)
     
-    def process_in_background(vid_id: str, url: str):
-        db_local = SessionLocal()
-        try:
-            video_local = db_local.query(Video).filter_by(id=vid_id).first()
-            if not video_local:
-                return
-            
-            # Fetch metadata using yt-dlp
-            result = subprocess.run(
-                ["yt-dlp", "--dump-json", url],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                metadata = json.loads(result.stdout)
-                video_local.title = metadata.get("title", "Unknown")
-                video_local.description = metadata.get("description", "")[:500] if metadata.get("description") else None
-                video_local.duration = int(metadata.get("duration", 0)) if metadata.get("duration") else None
-                video_local.thumbnail_url = metadata.get("thumbnail")
-                video_local.status = "completed"
-            else:
-                video_local.status = "failed"
-                video_local.error_message = "Failed to fetch video metadata"
-            
-            db_local.commit()
-        except Exception as e:
-            if video_local:
-                video_local.status = "failed"
-                video_local.error_message = str(e)
-                db_local.commit()
-        finally:
-            db_local.close()
-    
-    thread = threading.Thread(target=process_in_background, args=(video_id, video.youtube_url))
-    thread.start()
-    
-    return {
-        "video_id": video_id,
-        "status": "processing",
-        "message": "Video processing started"
-    }
+    return _map_video_response(new_video)
 
+@router.get("/", response_model=List[VideoStatusResponse])
+async def list_videos(db: Session = Depends(get_db)):
+    """List all videos"""
+    videos = db.query(Video).order_by(Video.created_at.desc()).all()
+    return [_map_video_response(v) for v in videos]
 
-@router.get("/{video_id}/status")
-async def get_video_status(
-    video_id: str,
-    db: Session = Depends(get_db)
-):
-    """Get video processing status"""
-    video = db.query(Video).filter_by(id=video_id).first()
-    
+@router.get("/{video_id}", response_model=VideoStatusResponse)
+async def get_video(video_id: int, db: Session = Depends(get_db)):
+    """Get video details"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return _map_video_response(video)
+
+@router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_video(video_id: int, db: Session = Depends(get_db)):
+    """Delete a video and its associated data"""
+    video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     
-    reels_count = db.query(Reel).filter_by(video_id=video_id).count()
-    
-    return {
-        "video_id": video_id,
-        "status": video.status,
-        "title": video.title,
-        "duration": video.duration,
-        "reels_created": reels_count,
-        "created_at": video.created_at,
-        "updated_at": video.updated_at
-    }
+    # Optional: Delete files from disk?
+    # For now, just delete DB record to clear UI
+    db.delete(video)
+    db.commit()
+    return None
+
+def _map_video_response(video: Video) -> VideoStatusResponse:
+    return VideoStatusResponse(
+        video_id=video.id,
+        youtube_url=video.youtube_url,
+        title=video.title,
+        description=video.description,
+        duration=video.duration,
+        thumbnail_url=video.thumbnail_url,
+        status=video.status,
+        progress=0.0, # TODO: calculate real progress
+        total_jobs=0,
+        completed_jobs=0,
+        failed_jobs=0,
+        reels_created=len(video.chunks) if video.chunks else 0,
+        error=video.error_message,
+        created_at=video.created_at
+    )
+

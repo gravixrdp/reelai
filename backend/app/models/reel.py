@@ -40,6 +40,18 @@ class Reel(Base, IDMixin, TimestampMixin):
     instagram_url = Column(String(500), nullable=True)
     is_uploaded = Column(Boolean, default=False, index=True)
     upload_error = Column(Text, nullable=True)
+    publish_status = Column(String(50), default='draft', nullable=False)  # draft, queued, published, failed
+    
+    # Frame & Editing Metadata (Smart Mini Editor)
+    frame_type = Column(String(50), default='CENTER_STRIP', nullable=False, index=True)
+    text_overlays = Column(JSON, nullable=True)  # [{text, zone, fontSize, x, y}]
+    has_shadow = Column(Boolean, default=False)
+    shadow_intensity = Column(Float, default=0.3)  # 0.0 - 1.0
+    has_overlay = Column(Boolean, default=False)
+    overlay_opacity = Column(Float, default=0.1)  # 0.0 - 1.0
+    is_edited = Column(Boolean, default=False, index=True)  # Track if user customized
+    original_file_path = Column(String(500), nullable=True)  # Original render before edits
+
     
     # Relationships
     video = relationship("Video", back_populates="reels")

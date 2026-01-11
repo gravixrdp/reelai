@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,27 +19,43 @@ import {
     Clock,
     CheckCircle2,
     AlertCircle,
-    Loader2
+    Loader2,
+    Square,
+    Edit
 } from "lucide-react";
 
 interface VideoData {
-    id: string;
+    video_id: number;
     title: string;
     youtube_url: string;
-    youtube_id: string;
-    duration: number;
+    description?: string;
+    duration?: number;
     thumbnail_url?: string;
-    status: "pending" | "downloading" | "processing" | "completed" | "failed";
-    reels_count: number;
-    created_at: string;
+    status: string;
+    progress: number;
+    total_jobs: number;
+    completed_jobs: number;
+    failed_jobs: number;
+    reels_created: number;
     error_message?: string;
+    created_at: string;
 }
 
 export default function VideosPage() {
+    const router = useRouter();
     const [videos, setVideos] = useState<VideoData[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState("");
     const [filterStatus, setFilterStatus] = useState<string>("all");
+    const [processingCount, setProcessingCount] = useState(0);
+
+    // Auth Check
+    useEffect(() => {
+        const token = localStorage.getItem("token");
+        if (!token) {
+            router.push("/login"); // Redirect if not logged in
+        }
+    }, [router]);
 
     useEffect(() => {
         fetchVideos();
@@ -46,13 +63,21 @@ export default function VideosPage() {
         return () => clearInterval(interval);
     }, []);
 
-    async function fetchVideos() {
+    const fetchVideos = async () => {
         try {
-            const response = await fetch("http://localhost:8000/api/video/");
-            if (response.ok) {
-                const data = await response.json();
-                setVideos(data);
+            const token = localStorage.getItem("token");
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+            const res = await fetch(`${apiUrl}/api/videos/`, {
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+            if (!res.ok) {
+                if (res.status === 401) router.push("/login");
+                throw new Error("Failed to fetch");
             }
+            const data = await res.json();
+            setVideos(data);
         } catch (error) {
             console.error("Failed to fetch videos:", error);
         } finally {
@@ -60,16 +85,16 @@ export default function VideosPage() {
         }
     }
 
-    async function deleteVideo(id: string) {
+    async function deleteVideo(id: number) {
         if (!confirm("Are you sure you want to delete this video?")) return;
 
         try {
-            const response = await fetch(`http://localhost:8000/api/video/${id}`, {
+            const response = await fetch(`/api/videos/${id}`, {
                 method: "DELETE",
             });
 
             if (response.ok) {
-                setVideos(videos.filter(v => v.id !== id));
+                setVideos(videos.filter(v => v.video_id !== id));
             }
         } catch (error) {
             console.error("Failed to delete video:", error);
@@ -180,22 +205,22 @@ export default function VideosPage() {
             ) : (
                 <FadeInStagger className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                     {filteredVideos.map((video) => (
-                        <FadeInItem key={video.id}>
-                            <Card className="h-full flex flex-col">
+                        <FadeInItem key={video.video_id}>
+                            <Card className="h-full flex flex-col bg-zinc-900/40 border-white/5 backdrop-blur-sm hover:bg-zinc-900/60 transition-colors group">
                                 <CardHeader className="pb-3">
                                     <div className="flex items-start justify-between gap-2">
-                                        <CardTitle className="text-base line-clamp-2">
+                                        <CardTitle className="text-base line-clamp-2 text-zinc-100 group-hover:text-white transition-colors">
                                             {video.title || "Untitled Video"}
                                         </CardTitle>
                                         {getStatusIcon(video.status)}
                                     </div>
                                     <div className="flex items-center gap-2 mt-2">
-                                        <Badge variant={getStatusColor(video.status) as any} className="text-xs">
+                                        <Badge variant={getStatusColor(video.status) as any} className="text-xs bg-white/5 hover:bg-white/10 border-white/5 text-zinc-300">
                                             {video.status}
                                         </Badge>
-                                        {video.reels_count > 0 && (
-                                            <Badge variant="outline" className="text-xs">
-                                                {video.reels_count} reel{video.reels_count !== 1 ? 's' : ''}
+                                        {video.reels_created > 0 && (
+                                            <Badge variant="outline" className="text-xs border-white/10 text-zinc-400">
+                                                {video.reels_created} reel{video.reels_created !== 1 ? 's' : ''}
                                             </Badge>
                                         )}
                                     </div>
@@ -203,11 +228,11 @@ export default function VideosPage() {
 
                                 <CardContent className="flex-1 flex flex-col justify-between space-y-4">
                                     {video.thumbnail_url && (
-                                        <div className="aspect-video rounded-md overflow-hidden bg-zinc-800">
+                                        <div className="aspect-video rounded-lg overflow-hidden bg-black/50 border border-white/5 relative group-hover:border-white/10 transition-colors">
                                             <img
                                                 src={video.thumbnail_url}
                                                 alt={video.title}
-                                                className="w-full h-full object-cover"
+                                                className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500"
                                             />
                                         </div>
                                     )}
@@ -222,13 +247,13 @@ export default function VideosPage() {
                                         )}
 
                                         {video.error_message && (
-                                            <div className="text-xs text-red-400 bg-red-900/10 p-2 rounded border border-red-900/20">
+                                            <div className="text-xs text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20">
                                                 {video.error_message}
                                             </div>
                                         )}
 
-                                        <div className="text-xs text-zinc-500 space-y-1">
-                                            <p>Duration: {Math.floor(video.duration / 60)}m {video.duration % 60}s</p>
+                                        <div className="text-xs text-zinc-500 space-y-1 font-mono">
+                                            <p>Duration: {video.duration ? `${Math.floor(video.duration / 60)}m ${video.duration % 60}s` : 'Unknown'}</p>
                                             <p>Added: {new Date(video.created_at).toLocaleDateString()}</p>
                                         </div>
                                     </div>
@@ -236,38 +261,79 @@ export default function VideosPage() {
                                     <div className="flex gap-2 pt-2">
                                         <Button
                                             size="sm"
-                                            variant="outline"
-                                            className="flex-1"
+                                            variant="ghost"
+                                            className="flex-1 text-zinc-400 hover:text-white hover:bg-white/10"
                                             onClick={() => window.open(video.youtube_url, "_blank")}
                                         >
                                             <Eye className="h-3 w-3 mr-1" />
                                             View
                                         </Button>
-                                        {video.status === "completed" && (
+                                        {(video.status === "processing" || video.status === "downloading") && (
                                             <Button
                                                 size="sm"
                                                 variant="outline"
-                                                onClick={() => window.location.href = `/videos/${video.id}/reels`}
+                                                className="border-yellow-500/20 text-yellow-500 hover:bg-yellow-500/10 hover:text-yellow-400"
+                                                onClick={async () => {
+                                                    if (!confirm("Stop processing this video?")) return;
+                                                    try {
+                                                        const response = await fetch(`/api/videos/${video.video_id}/cancel`, {
+                                                            method: "POST"
+                                                        });
+                                                        if (response.ok) {
+                                                            // Optimistically update status
+                                                            setVideos(videos.map(v =>
+                                                                v.video_id === video.video_id
+                                                                    ? { ...v, status: 'failed', error_message: 'Cancelled by user' }
+                                                                    : v
+                                                            ));
+                                                        }
+                                                    } catch (e) {
+                                                        console.error("Failed to stop video:", e);
+                                                    }
+                                                }}
                                             >
-                                                <Share2 className="h-3 w-3 mr-1" />
-                                                Reels
+                                                <Square className="h-3 w-3 mr-1 fill-current" />
+                                                Stop
                                             </Button>
                                         )}
-                                        <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => deleteVideo(video.id)}
-                                            className="text-red-400 hover:text-red-300"
-                                        >
-                                            <Trash2 className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                </CardContent>
-                            </Card>
+                                        {video.status === "completed" && (
+                                            <Button
+                                                size="sm"
+                                                className="bg-white text-black hover:bg-zinc-200"
+                                                onClick={() => window.location.href = `/videos/${video.video_id}/reels`}
+                                            >
+                                                <Share2 className="h-3 w-3 mr-1" />
+                                            <Share2 className="h-3 w-3 mr-1" />
+                                                Reels
+                                            </Button>
+                                            
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-white/10 hover:bg-white/10 text-zinc-300"
+                                                onClick={() => router.push(`/editor/${video.video_id}`)}
+                                            >
+                                                <Edit className="h-3 w-3 mr-1" />
+                                                Edit
+                                            </Button>
+                                        </>
+                                        )}
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => deleteVideo(video.video_id)}
+                                        className="text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                                    >
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
                         </FadeInItem>
-                    ))}
-                </FadeInStagger>
-            )}
-        </div>
+            ))}
+        </FadeInStagger>
+    )
+}
+        </div >
     );
 }

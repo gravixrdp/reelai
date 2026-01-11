@@ -59,21 +59,18 @@ export default function AddVideoPage() {
             ));
 
             try {
-                const response = await fetch("http://localhost:8000/api/video/youtube", {
+                // Call real backend API
+                // Nginx will route /api/videos -> localhost:8000/videos
+                const response = await fetch("/api/videos/", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
-                    body: JSON.stringify({ youtube_url: upload.url }),
+                    body: JSON.stringify({
+                        youtube_url: upload.url,
+                        title: `Imported via Web ${new Date().toISOString()}`
+                    }),
                 });
-
-                // Simulate progress
-                for (let progress = 0; progress <= 100; progress += 10) {
-                    await new Promise(resolve => setTimeout(resolve, 150));
-                    setUploads(prev => prev.map(u =>
-                        u.id === upload.id ? { ...u, progress } : u
-                    ));
-                }
 
                 if (response.ok) {
                     const data = await response.json();
@@ -84,17 +81,11 @@ export default function AddVideoPage() {
 
                     toast({
                         title: "Success",
-                        description: `Video uploaded successfully: ${data.title || upload.url}`,
+                        description: `Video queued for processing: ${data.video_id}`,
                     });
-
-                    // Start processing
-                    if (data.id) {
-                        await fetch(`http://localhost:8000/api/video/${data.id}/process`, {
-                            method: "POST",
-                        });
-                    }
                 } else {
-                    throw new Error("Upload failed");
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || "Upload failed");
                 }
             } catch (error) {
                 setUploads(prev => prev.map(u =>

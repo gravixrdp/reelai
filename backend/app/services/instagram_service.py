@@ -9,6 +9,53 @@ class InstagramService:
     def __init__(self, db: Session):
         self.db = db
 
+    def get_auth_url(self, client_id: str, redirect_uri: str) -> str:
+        """
+        Generate the Facebook Login URL for Instagram Graph API.
+        """
+        base_url = "https://www.facebook.com/v19.0/dialog/oauth"
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement",
+            "response_type": "code"
+        }
+        # Construct URL manually to avoid deps if simple
+        query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+        return f"{base_url}?{query_string}"
+
+    def exchange_code_for_token(self, client_id: str, client_secret: str, redirect_uri: str, code: str) -> str:
+        """
+        Exchange the authorization code for a short-lived user access token.
+        """
+        url = "https://graph.facebook.com/v19.0/oauth/access_token"
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "client_secret": client_secret,
+            "code": code
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return data["access_token"]
+
+    def get_long_lived_token(self, client_id: str, client_secret: str, short_lived_token: str) -> str:
+        """
+        Exchange a short-lived token for a long-lived one (60 days).
+        """
+        url = "https://graph.facebook.com/v19.0/oauth/access_token"
+        params = {
+            "grant_type": "fb_exchange_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "fb_exchange_token": short_lived_token
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return data["access_token"]
+
     def create_account(self, account_data: InstagramAccountCreate) -> InstagramAccount:
         """
         Create Instagram account.
@@ -27,30 +74,31 @@ class InstagramService:
                 
                 pages_data = response.json()
                 if not pages_data.get("data"):
-                    raise ValueError("No Facebook pages found for this access token")
-                
-                # Get the first page (you might want to let user choose)
-                page_id = pages_data["data"][0]["id"]
-                page_token = pages_data["data"][0]["access_token"]
-                
-                # Get Instagram Business Account ID from the page
-                ig_url = f"https://graph.facebook.com/v19.0/{page_id}"
-                ig_params = {
-                    "fields": "instagram_business_account",
-                    "access_token": page_token
-                }
-                ig_response = requests.get(ig_url, params=ig_params)
-                ig_response.raise_for_status()
-                
-                ig_data = ig_response.json()
-                instagram_user_id = ig_data.get("instagram_business_account", {}).get("id")
-                
-                if not instagram_user_id:
-                    raise ValueError("No Instagram Business Account linked to this Facebook page")
+                    # This might happen if user has no pages or didn't grant permission
+                    pass
+                else:
+                    # Logic to find the correct page/IG account
+                    # For now, we iterate and find the first one with an IG business account
+                    for page in pages_data["data"]:
+                        page_id = page["id"]
+                        page_token = page["access_token"]
+                        
+                        # Get Instagram Business Account ID from the page
+                        ig_url = f"https://graph.facebook.com/v19.0/{page_id}"
+                        ig_params = {
+                            "fields": "instagram_business_account",
+                            "access_token": page_token
+                        }
+                        ig_response = requests.get(ig_url, params=ig_params)
+                        if ig_response.ok:
+                            ig_data = ig_response.json()
+                            found_ig_id = ig_data.get("instagram_business_account", {}).get("id")
+                            if found_ig_id:
+                                instagram_user_id = found_ig_id
+                                break
                     
             except Exception as e:
                 # Don't fail account creation if we can't fetch the ID
-                # User can provide it later during verification
                 pass
         
         db_account = InstagramAccount(

@@ -18,16 +18,21 @@ const navItems = [
 export default function Sidebar() {
     const pathname = usePathname();
 
+    if (pathname === "/" || pathname === "/login") return null;
+
     return (
         <motion.aside
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-            className="w-20 h-full flex flex-col items-center py-8 border-r border-white/5 bg-black/20 backdrop-blur-md"
+            className="w-20 h-full flex flex-col items-center py-8 border-r border-white/5 bg-black/40 backdrop-blur-2xl"
         >
             <div className="mb-12">
-                <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
-                    <div className="w-3 h-3 bg-black rounded-full" />
+                <div className="relative w-8 h-8 flex items-center justify-center group">
+                    <div className="absolute inset-0 bg-gradient-to-br from-cyan-500 to-purple-500 rounded-full blur-md opacity-20 group-hover:opacity-40 transition-opacity" />
+                    <div className="w-8 h-8 bg-zinc-900 rounded-full flex items-center justify-center border border-white/10 relative z-10">
+                        <div className="w-2.5 h-2.5 bg-white rounded-full" />
+                    </div>
                 </div>
             </div>
 
@@ -44,7 +49,7 @@ export default function Sidebar() {
                             {isActive && (
                                 <motion.div
                                     layoutId="activeTab"
-                                    className="absolute inset-0 bg-white/10 rounded-xl"
+                                    className="absolute inset-x-2 inset-y-2 bg-gradient-to-br from-white/10 to-transparent rounded-xl border border-white/5"
                                     transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                 />
                             )}

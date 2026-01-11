@@ -20,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={cn(inter.variable, "bg-background text-foreground antialiased selection:bg-white/20 overflow-hidden")}>
+      <body suppressHydrationWarning className={cn(inter.variable, "bg-background text-foreground antialiased selection:bg-white/20 overflow-hidden")}>
         <Background />
         <div className="flex h-screen w-full relative z-10">
           <Sidebar />

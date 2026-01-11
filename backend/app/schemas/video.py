@@ -15,6 +15,11 @@ class VideoUploadRequest(BaseModel):
 class VideoStatusResponse(BaseModel):
     """Video processing status"""
     video_id: int
+    youtube_url: str
+    title: Optional[str]
+    description: Optional[str] = None
+    duration: Optional[float] = None
+    thumbnail_url: Optional[str] = None
     status: str
     progress: float
     total_jobs: int

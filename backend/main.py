@@ -36,11 +36,22 @@ app.add_middleware(
 
 # Include routers
 # Include routers
-app.include_router(health.router)
-app.include_router(video.router)
-app.include_router(reels.router)
-app.include_router(social.router)
-app.include_router(social_checker.router)
+app.include_router(health.router, prefix="/api")
+app.include_router(video.router, prefix="/api")
+app.include_router(reels.router, prefix="/api")
+app.include_router(social.router, prefix="/api")
+app.include_router(social.router, prefix="/api")
+app.include_router(social_checker.router, prefix="/api")
+
+# Editor router
+from app.api import editor
+app.include_router(editor.router, prefix="/api")
+
+# Auth router
+from app.api import auth
+app.include_router(auth.router, prefix="/api")
+
+# New verified instagram router
 
 # New verified instagram router
 from app.api.routers import instagram as instagram_verified

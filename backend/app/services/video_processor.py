@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class VideoProcessor:
     """Cut videos into sequential 35-second chunks"""
     
-    def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe", chunk_duration: int = 35):
+    def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe", chunk_duration: int = 30):
         self.ffmpeg_path = ffmpeg_path
         self.ffprobe_path = ffprobe_path
         self.chunk_duration = chunk_duration
@@ -39,7 +39,7 @@ class VideoProcessor:
     
     def cut_video_into_chunks(self, video_path: str, chunk_dir: str) -> List[Tuple[str, int, int, int]]:
         """
-        Cut video into sequential 35-second chunks ONLY (no random cutting)
+        Cut video into sequential 30-second chunks with 9:16 aspect ratio (Reels format).
         Returns: List of (chunk_path, chunk_index, start_time, end_time)
         """
         try:
@@ -65,14 +65,21 @@ class VideoProcessor:
                 
                 chunk_path = os.path.join(chunk_dir, f"chunk_{chunk_index:03d}.mp4")
                 
-                # FFmpeg command to cut chunk
+                # FFmpeg command to cut chunk AND convert to 9:16
+                # Filter: Scale to fit 1080x1920 box, decrease if needed, then pad with black bars to fill 1080x1920
+                filter_complex = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
+                
                 cmd = [
                     self.ffmpeg_path,
                     "-i", video_path,
                     "-ss", str(start_time),
-                    "-to", str(end_time),
-                    "-c", "copy",  # Copy codec, no re-encoding
-                    "-y",  # Overwrite output
+                    "-t", str(duration),
+                    "-c:v", "libx264",
+                    "-c:a", "aac",
+                    "-vf", filter_complex,
+                    "-crf", "23",            # Good quality
+                    "-preset", "fast",       # Reasonable speed
+                    "-y",                    # Overwrite
                     chunk_path
                 ]
                 
